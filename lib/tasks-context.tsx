@@ -2,23 +2,24 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { useAuth } from "./auth-context"
+import { createClient } from "@/lib/supabase/client"
 
 export interface Task {
   id: string
-  userId: string
+  user_id: string
   title: string
   description: string
-  categoryId: string
-  frequency: "once" | "daily" | "weekly" | "monthly" | "yearly"
-  nextReminder: string
-  emailEnabled: boolean
-  createdAt: string
+  category_id: string
+  frequency: "once" | "daily" | "weekly" | "monthly"
+  next_reminder: string
+  email_notification: boolean
   completed: boolean
+  created_at: string
 }
 
 export interface Category {
   id: string
-  userId: string
+  user_id: string
   name: string
   color: string
   icon: string
@@ -27,121 +28,168 @@ export interface Category {
 interface TasksContextType {
   tasks: Task[]
   categories: Category[]
-  addTask: (task: Omit<Task, "id" | "userId" | "createdAt">) => void
-  updateTask: (id: string, updates: Partial<Task>) => void
-  deleteTask: (id: string) => void
-  addCategory: (category: Omit<Category, "id" | "userId">) => void
-  updateCategory: (id: string, updates: Partial<Category>) => void
-  deleteCategory: (id: string) => void
+  addTask: (task: Omit<Task, "id" | "user_id" | "created_at">) => Promise<void>
+  updateTask: (id: string, updates: Partial<Task>) => Promise<void>
+  deleteTask: (id: string) => Promise<void>
+  addCategory: (category: Omit<Category, "id" | "user_id">) => Promise<void>
+  updateCategory: (id: string, updates: Partial<Category>) => Promise<void>
+  deleteCategory: (id: string) => Promise<void>
   getTasksByCategory: (categoryId: string) => Task[]
+  isLoading: boolean
 }
 
 const TasksContext = createContext<TasksContextType | undefined>(undefined)
-
-const DEFAULT_CATEGORIES: Omit<Category, "id" | "userId">[] = [
-  { name: "Home", color: "bg-blue-500", icon: "🏠" },
-  { name: "Work", color: "bg-purple-500", icon: "💼" },
-  { name: "Personal", color: "bg-green-500", icon: "👤" },
-]
 
 export function TasksProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [tasks, setTasks] = useState<Task[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const supabase = createClient()
 
   useEffect(() => {
     if (user) {
-      // Load tasks
-      const storedTasks = localStorage.getItem(`tasks-${user.id}`)
-      if (storedTasks) {
-        setTasks(JSON.parse(storedTasks))
-      }
-
-      // Load or initialize categories
-      const storedCategories = localStorage.getItem(`categories-${user.id}`)
-      if (storedCategories) {
-        setCategories(JSON.parse(storedCategories))
-      } else {
-        // Initialize with default categories
-        const defaultCats = DEFAULT_CATEGORIES.map((cat) => ({
-          ...cat,
-          id: crypto.randomUUID(),
-          userId: user.id,
-        }))
-        setCategories(defaultCats)
-        localStorage.setItem(`categories-${user.id}`, JSON.stringify(defaultCats))
-      }
+      loadData()
+    } else {
+      setTasks([])
+      setCategories([])
+      setIsLoading(false)
     }
   }, [user])
 
-  const addTask = (task: Omit<Task, "id" | "userId" | "createdAt">) => {
+  const loadData = async () => {
     if (!user) return
 
-    const newTask: Task = {
-      ...task,
-      id: crypto.randomUUID(),
-      userId: user.id,
-      createdAt: new Date().toISOString(),
+    setIsLoading(true)
+
+    // Load categories
+    const { data: categoriesData, error: categoriesError } = await supabase
+      .from("categories")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+
+    if (categoriesError) {
+      console.error("[v0] Error loading categories:", categoriesError)
+    } else {
+      setCategories(categoriesData || [])
     }
 
-    const updatedTasks = [...tasks, newTask]
-    setTasks(updatedTasks)
-    localStorage.setItem(`tasks-${user.id}`, JSON.stringify(updatedTasks))
-  }
+    // Load tasks
+    const { data: tasksData, error: tasksError } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
 
-  const updateTask = (id: string, updates: Partial<Task>) => {
-    if (!user) return
-
-    const updatedTasks = tasks.map((task) => (task.id === id ? { ...task, ...updates } : task))
-    setTasks(updatedTasks)
-    localStorage.setItem(`tasks-${user.id}`, JSON.stringify(updatedTasks))
-  }
-
-  const deleteTask = (id: string) => {
-    if (!user) return
-
-    const updatedTasks = tasks.filter((task) => task.id !== id)
-    setTasks(updatedTasks)
-    localStorage.setItem(`tasks-${user.id}`, JSON.stringify(updatedTasks))
-  }
-
-  const addCategory = (category: Omit<Category, "id" | "userId">) => {
-    if (!user) return
-
-    const newCategory: Category = {
-      ...category,
-      id: crypto.randomUUID(),
-      userId: user.id,
+    if (tasksError) {
+      console.error("[v0] Error loading tasks:", tasksError)
+    } else {
+      setTasks(tasksData || [])
     }
 
-    const updatedCategories = [...categories, newCategory]
-    setCategories(updatedCategories)
-    localStorage.setItem(`categories-${user.id}`, JSON.stringify(updatedCategories))
+    setIsLoading(false)
   }
 
-  const updateCategory = (id: string, updates: Partial<Category>) => {
+  const addTask = async (task: Omit<Task, "id" | "user_id" | "created_at">) => {
     if (!user) return
 
-    const updatedCategories = categories.map((cat) => (cat.id === id ? { ...cat, ...updates } : cat))
-    setCategories(updatedCategories)
-    localStorage.setItem(`categories-${user.id}`, JSON.stringify(updatedCategories))
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({
+        user_id: user.id,
+        title: task.title,
+        description: task.description,
+        category_id: task.category_id,
+        frequency: task.frequency,
+        next_reminder: task.next_reminder,
+        email_notification: task.email_notification,
+        completed: task.completed,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("[v0] Error adding task:", error)
+    } else {
+      setTasks([data, ...tasks])
+    }
   }
 
-  const deleteCategory = (id: string) => {
+  const updateTask = async (id: string, updates: Partial<Task>) => {
     if (!user) return
 
-    // Delete category and all associated tasks
-    const updatedCategories = categories.filter((cat) => cat.id !== id)
-    const updatedTasks = tasks.filter((task) => task.categoryId !== id)
+    const { error } = await supabase.from("tasks").update(updates).eq("id", id).eq("user_id", user.id)
 
-    setCategories(updatedCategories)
-    setTasks(updatedTasks)
-    localStorage.setItem(`categories-${user.id}`, JSON.stringify(updatedCategories))
-    localStorage.setItem(`tasks-${user.id}`, JSON.stringify(updatedTasks))
+    if (error) {
+      console.error("[v0] Error updating task:", error)
+    } else {
+      setTasks(tasks.map((task) => (task.id === id ? { ...task, ...updates } : task)))
+    }
+  }
+
+  const deleteTask = async (id: string) => {
+    if (!user) return
+
+    const { error } = await supabase.from("tasks").delete().eq("id", id).eq("user_id", user.id)
+
+    if (error) {
+      console.error("[v0] Error deleting task:", error)
+    } else {
+      setTasks(tasks.filter((task) => task.id !== id))
+    }
+  }
+
+  const addCategory = async (category: Omit<Category, "id" | "user_id">) => {
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from("categories")
+      .insert({
+        user_id: user.id,
+        name: category.name,
+        color: category.color,
+        icon: category.icon,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("[v0] Error adding category:", error)
+    } else {
+      setCategories([...categories, data])
+    }
+  }
+
+  const updateCategory = async (id: string, updates: Partial<Category>) => {
+    if (!user) return
+
+    const { error } = await supabase.from("categories").update(updates).eq("id", id).eq("user_id", user.id)
+
+    if (error) {
+      console.error("[v0] Error updating category:", error)
+    } else {
+      setCategories(categories.map((cat) => (cat.id === id ? { ...cat, ...updates } : cat)))
+    }
+  }
+
+  const deleteCategory = async (id: string) => {
+    if (!user) return
+
+    // Delete category (tasks will be set to null due to on delete set null)
+    const { error } = await supabase.from("categories").delete().eq("id", id).eq("user_id", user.id)
+
+    if (error) {
+      console.error("[v0] Error deleting category:", error)
+    } else {
+      setCategories(categories.filter((cat) => cat.id !== id))
+      // Update local tasks to reflect category removal
+      setTasks(tasks.map((task) => (task.category_id === id ? { ...task, category_id: "" } : task)))
+    }
   }
 
   const getTasksByCategory = (categoryId: string) => {
-    return tasks.filter((task) => task.categoryId === categoryId)
+    return tasks.filter((task) => task.category_id === categoryId)
   }
 
   return (
@@ -156,6 +204,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         updateCategory,
         deleteCategory,
         getTasksByCategory,
+        isLoading,
       }}
     >
       {children}

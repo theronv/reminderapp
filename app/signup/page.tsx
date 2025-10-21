@@ -5,7 +5,7 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { useAuth } from "@/lib/auth-context"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,8 +19,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const { signup } = useAuth()
   const router = useRouter()
+  const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,13 +33,22 @@ export default function SignupPage() {
       return
     }
 
-    const success = await signup(email, password, name)
+    const { error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/dashboard`,
+        data: {
+          full_name: name,
+        },
+      },
+    })
 
-    if (success) {
-      router.push("/dashboard")
-    } else {
-      setError("An account with this email already exists")
+    if (signUpError) {
+      setError(signUpError.message)
       setIsLoading(false)
+    } else {
+      router.push("/auth/confirm")
     }
   }
 

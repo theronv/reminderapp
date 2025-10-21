@@ -5,7 +5,7 @@ import type React from "react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { useAuth } from "@/lib/auth-context"
+import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,21 +18,24 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const { login } = useAuth()
   const router = useRouter()
+  const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
     setIsLoading(true)
 
-    const success = await login(email, password)
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-    if (success) {
-      router.push("/dashboard")
-    } else {
-      setError("Invalid email or password")
+    if (signInError) {
+      setError(signInError.message)
       setIsLoading(false)
+    } else {
+      router.push("/dashboard")
     }
   }
 
